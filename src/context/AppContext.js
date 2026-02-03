@@ -9,11 +9,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initialReports } from '../data/reports';
 import { useLanguage } from './LanguageContext';
 import { createReport as createReportService } from '../services/reportService';
+import { verifyAdminRole } from '../services/adminService';
 
 const AppContext = createContext();
 
 const REPORTS_STORAGE_KEY = '@reports_data';
 const NOTIFICATIONS_STORAGE_KEY = '@notifications_data';
+const CURRENT_USER_STORAGE_KEY = '@current_user';
 
 export const useApp = () => {
 	const context = useContext(AppContext);
@@ -27,11 +29,7 @@ export const AppProvider = ({ children }) => {
 	const { t } = useLanguage();
 	const [reports, setReports] = useState(initialReports);
 	const [notifications, setNotifications] = useState([]);
-	const [currentUser] = useState({
-		id: 1,
-		name: 'John Citizen',
-		email: 'john.citizen@email.com',
-	});
+	const [currentUser, setCurrentUser] = useState(null);
 	const [isAdmin, setIsAdmin] = useState(false);
 	const [isLoading, setIsLoading] = useState(true);
 
@@ -44,12 +42,27 @@ export const AppProvider = ({ children }) => {
 				const storedNotifications = await AsyncStorage.getItem(
 					NOTIFICATIONS_STORAGE_KEY,
 				);
+				const storedUser = await AsyncStorage.getItem(
+					CURRENT_USER_STORAGE_KEY,
+				);
 
 				if (storedReports) {
 					setReports(JSON.parse(storedReports));
 				}
 				if (storedNotifications) {
 					setNotifications(JSON.parse(storedNotifications));
+				}
+				if (storedUser) {
+					const user = JSON.parse(storedUser);
+					setCurrentUser(user);
+					// Verify if user is admin (if we have a uid)
+					if (user.uid) {
+						// We don't await here to not block UI, but it might be better to await if we want to redirect correctly
+						// For now, let's keep it simple.
+						verifyAdminRole(user.uid).then((isAdminRole) => {
+							setIsAdmin(isAdminRole);
+						});
+					}
 				}
 			} catch (error) {
 				console.error('Error loading data:', error);
@@ -95,13 +108,48 @@ export const AppProvider = ({ children }) => {
 		saveNotifications();
 	}, [notifications, isLoading]);
 
-	// Get user's reports
+	// Save current user whenever it changes
+	useEffect(() => {
+		const saveUser = async () => {
+			if (!isLoading) {
+				try {
+					if (currentUser) {
+						await AsyncStorage.setItem(
+							CURRENT_USER_STORAGE_KEY,
+							JSON.stringify(currentUser),
+						);
+					} else {
+						await AsyncStorage.removeItem(CURRENT_USER_STORAGE_KEY);
+					}
+				} catch (error) {
+					console.error('Error saving user:', error);
+				}
+			}
+		};
+		saveUser();
+	}, [currentUser, isLoading]);
+
+	// Get reports for current user
+	// ← FIXED: was currentUser?.id, now currentUser?.uid
+	// create.js saves userId: currentUser.uid, so this must match
 	const getUserReports = useCallback(
-		(userId = currentUser.id) => {
+		(userId = currentUser?.uid) => {
+			if (!userId) return [];
 			return reports.filter((r) => r.userId === userId);
 		},
-		[reports, currentUser.id],
+		[reports, currentUser],
 	);
+
+	// ← NEW: home.js calls getUserStats() but it didn't exist
+	// Simply counts the current user's reports by status
+	const getUserStats = useCallback(() => {
+		const myReports = getUserReports();
+		return {
+			total:    myReports.length,
+			pending:  myReports.filter((r) => r.status === 'pending' || r.status === 'Pending').length,
+			resolved: myReports.filter((r) => r.status === 'resolved' || r.status === 'Resolved').length,
+		};
+	}, [getUserReports]);
 
 	// Get reports by status
 	const getReportsByStatus = useCallback(
@@ -182,197 +230,385 @@ export const AppProvider = ({ children }) => {
 
 	const addReport = useCallback(
 		async (reportData) => {
-			const maxId =
-				reports.length > 0 ? Math.max(...reports.map((r) => r.id)) : 0;
-			const newReportBase = {
-				...reportData,
-				status: 'Pending',
-				department: null,
-				createdAt: new Date().toISOString().split('T')[0],
-				userId: currentUser.id,
-				timeline: [
-					{
-						status: 'Pending',
-						date: new Date().toLocaleString(),
-						note: t('submittedBy'),
-					},
-				],
-			};
-			const remoteId = await createReportService({
-				...newReportBase,
-			});
-			const newReport = {
-				id: maxId + 1,
-				...newReportBase,
-				remoteId,
-			};
-			setReports((prev) => [newReport, ...prev]);
-			addNotification({
-				type: 'info',
-				titleKey: 'reportSubmitted',
-				messageKey: 'reportSubmittedMsg',
-				icon: '📝',
-				reportId: newReport.id,
-			});
-			return newReport;
-		},
-		[reports, currentUser.id, t, addNotification],
-	);
+			try {
+				// Save to Firestore
+				const firestoreId = await createReportService(reportData);
 
-	// Update report status
-	const updateReportStatus = useCallback(
-		(id, status, note = '') => {
-			setReports((prev) =>
-				prev.map((report) => {
-					if (report.id === id) {
-						const statusKey = getStatusKey(status);
-						const updatedReport = {
-							...report,
-							status,
-							timeline: [
-								...report.timeline,
-								{
-									status,
-									date: new Date().toLocaleString(),
-									note:
-										note ||
-										t('statusUpdatedTo', {
-											status: t(statusKey),
-										}),
-								},
-							],
-						};
+				// Save to local state (for citizen view)
+				const newReport = {
+					id: firestoreId, // Use Firestore ID
+					...reportData,
+					createdAt: new Date().toISOString().split('T')[0],
+					status: 'pending',
+					timeline: [
+						{
+							status: 'pending',
+							date: new Date().toLocaleString(),
+							note: t('submittedBy'),
+						},
+					],
+				};
 
-						// Add notification for the user
-						addNotification({
-							type: 'status',
-							titleKey: 'reportStatusUpdated',
-							messageKey:
-								status === 'Resolved'
-									? 'reportResolvedMsg'
-									: 'reportStatusUpdatedMsg',
-							icon: status === 'Resolved' ? '✅' : '🔄',
-							reportId: id,
-							statusKey: statusKey,
-						});
+				setReports((prev) => [newReport, ...prev]);
 
-						return updatedReport;
-					}
-					return report;
-				}),
-			);
-		},
-		[t, addNotification],
-	);
+				addNotification({
+					titleKey:   'reportSubmitted',
+					messageKey: 'reportSubmittedMsg',
+					type:       'success',
+					icon:       '✅',
+				});
 
-	// Assign report to department
-	const assignDepartment = useCallback(
-		(id, department) => {
-			setReports((prev) =>
-				prev.map((report) => {
-					if (report.id === id) {
-						const deptKey = getCategoryKey(department);
-						const updatedReport = {
-							...report,
-							department,
-							status:
-								report.status === 'Pending'
-									? 'Assigned'
-									: report.status,
-						};
-
-						const newStatus =
-							report.status === 'Pending'
-								? 'Assigned'
-								: report.status;
-
-						if (report.status === 'Pending') {
-							updatedReport.timeline = [
-								...report.timeline,
-								{
-									status: 'Assigned',
-									date: new Date().toLocaleString(),
-									note: t('assignedTo', {
-										department: t(deptKey),
-									}),
-								},
-							];
-
-							// Add notification for the user
-							addNotification({
-								type: 'status',
-								titleKey: 'reportAssigned',
-								messageKey: 'reportStatusAssignedMsg',
-								icon: '👤',
-								reportId: id,
-								departmentKey: deptKey,
-							});
-						}
-						return updatedReport;
-					}
-					return report;
-				}),
-			);
-		},
-		[t, addNotification],
-	);
-
-	// Get statistics
-	const getStats = useCallback(() => {
-		const total = reports.length;
-		const pending = reports.filter((r) => r.status === 'Pending').length;
-		const inProgress = reports.filter(
-			(r) => r.status === 'In Progress' || r.status === 'Assigned',
-		).length;
-		const resolved = reports.filter((r) => r.status === 'Resolved').length;
-		return { total, pending, inProgress, resolved };
-	}, [reports]);
-
-	// Get user statistics
-	const getUserStats = useCallback(() => {
-		const userReports = getUserReports();
-		const total = userReports.length;
-		const pending = userReports.filter((r) => r.status === 'Pending').length;
-		const resolved = userReports.filter((r) => r.status === 'Resolved').length;
-		return { total, pending, resolved };
-	}, [getUserReports]);
-
-	// Get department statistics
-	const getDepartmentStats = useCallback(() => {
-		const deptStats = {};
-		reports.forEach((report) => {
-			const dept = report.category;
-			if (!deptStats[dept]) {
-				deptStats[dept] = 0;
+				return firestoreId;
+			} catch (error) {
+				console.error('Error adding report:', error);
+				throw error;
 			}
-			deptStats[dept]++;
-		});
-		return deptStats;
-	}, [reports]);
+		},
+		[currentUser, addNotification, t],
+	);
 
-	const value = {
-		reports,
-		notifications,
-		currentUser,
-		isAdmin,
-		setIsAdmin,
-		isLoading,
-		getUserReports,
-		getReportsByStatus,
-		getReportsByDepartment,
-		getReport,
-		addReport,
-		updateReportStatus,
-		assignDepartment,
-		getStats,
-		getUserStats,
-		getDepartmentStats,
-		markNotificationAsRead,
-		markAllNotificationsAsRead,
+	const login = async (userData) => {
+		setCurrentUser(userData);
+		if (userData.uid) {
+			const isAdminRole = await verifyAdminRole(userData.uid);
+			setIsAdmin(isAdminRole);
+		}
 	};
 
-	return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+	const logout = async () => {
+		setCurrentUser(null);
+		setIsAdmin(false);
+		await AsyncStorage.removeItem(CURRENT_USER_STORAGE_KEY);
+	};
+
+	return (
+		<AppContext.Provider
+			value={{
+				reports,
+				notifications,
+				currentUser,
+				setCurrentUser,
+				isAdmin,
+				setIsAdmin,
+				isLoading,
+				getUserReports,
+				getUserStats,
+				getReportsByStatus,
+				getReportsByDepartment,
+				getReport,
+				getStatusKey,
+				getCategoryKey,
+				addNotification,
+				markNotificationAsRead,
+				markAllNotificationsAsRead,
+				addReport,
+				login,
+				logout,
+			}}
+		>
+			{children}
+		</AppContext.Provider>
+	);
 };
 
 export default AppContext;
+// import React, {
+// 	createContext,
+// 	useContext,
+// 	useState,
+// 	useCallback,
+// 	useEffect,
+// } from 'react';
+// import AsyncStorage from '@react-native-async-storage/async-storage';
+// import { initialReports } from '../data/reports';
+// import { useLanguage } from './LanguageContext';
+// import { createReport as createReportService } from '../services/reportService';
+// import { verifyAdminRole } from '../services/adminService';
+
+// const AppContext = createContext();
+
+// const REPORTS_STORAGE_KEY = '@reports_data';
+// const NOTIFICATIONS_STORAGE_KEY = '@notifications_data';
+// const CURRENT_USER_STORAGE_KEY = '@current_user';
+
+// export const useApp = () => {
+// 	const context = useContext(AppContext);
+// 	if (!context) {
+// 		throw new Error('useApp must be used within an AppProvider');
+// 	}
+// 	return context;
+// };
+
+// export const AppProvider = ({ children }) => {
+// 	const { t } = useLanguage();
+// 	const [reports, setReports] = useState(initialReports);
+// 	const [notifications, setNotifications] = useState([]);
+// 	const [currentUser, setCurrentUser] = useState(null);
+// 	const [isAdmin, setIsAdmin] = useState(false);
+// 	const [isLoading, setIsLoading] = useState(true);
+
+// 	// Load data on mount
+// 	useEffect(() => {
+// 		const loadData = async () => {
+// 			try {
+// 				const storedReports =
+// 					await AsyncStorage.getItem(REPORTS_STORAGE_KEY);
+// 				const storedNotifications = await AsyncStorage.getItem(
+// 					NOTIFICATIONS_STORAGE_KEY,
+// 				);
+// 				const storedUser = await AsyncStorage.getItem(
+// 					CURRENT_USER_STORAGE_KEY,
+// 				);
+
+// 				if (storedReports) {
+// 					setReports(JSON.parse(storedReports));
+// 				}
+// 				if (storedNotifications) {
+// 					setNotifications(JSON.parse(storedNotifications));
+// 				}
+// 				if (storedUser) {
+// 					const user = JSON.parse(storedUser);
+// 					setCurrentUser(user);
+// 					// Verify if user is admin (if we have a uid)
+// 					if (user.uid) {
+// 						// We don't await here to not block UI, but it might be better to await if we want to redirect correctly
+// 						// For now, let's keep it simple.
+// 						verifyAdminRole(user.uid).then((isAdminRole) => {
+// 							setIsAdmin(isAdminRole);
+// 						});
+// 					}
+// 				}
+// 			} catch (error) {
+// 				console.error('Error loading data:', error);
+// 			} finally {
+// 				setIsLoading(false);
+// 			}
+// 		};
+
+// 		loadData();
+// 	}, []);
+
+// 	// Save reports whenever they change
+// 	useEffect(() => {
+// 		const saveReports = async () => {
+// 			if (!isLoading) {
+// 				try {
+// 					await AsyncStorage.setItem(
+// 						REPORTS_STORAGE_KEY,
+// 						JSON.stringify(reports),
+// 					);
+// 				} catch (error) {
+// 					console.error('Error saving reports:', error);
+// 				}
+// 			}
+// 		};
+// 		saveReports();
+// 	}, [reports, isLoading]);
+
+// 	// Save notifications whenever they change
+// 	useEffect(() => {
+// 		const saveNotifications = async () => {
+// 			if (!isLoading) {
+// 				try {
+// 					await AsyncStorage.setItem(
+// 						NOTIFICATIONS_STORAGE_KEY,
+// 						JSON.stringify(notifications),
+// 					);
+// 				} catch (error) {
+// 					console.error('Error saving notifications:', error);
+// 				}
+// 			}
+// 		};
+// 		saveNotifications();
+// 	}, [notifications, isLoading]);
+
+// 	// Save current user whenever it changes
+// 	useEffect(() => {
+// 		const saveUser = async () => {
+// 			if (!isLoading) {
+// 				try {
+// 					if (currentUser) {
+// 						await AsyncStorage.setItem(
+// 							CURRENT_USER_STORAGE_KEY,
+// 							JSON.stringify(currentUser),
+// 						);
+// 					} else {
+// 						await AsyncStorage.removeItem(CURRENT_USER_STORAGE_KEY);
+// 					}
+// 				} catch (error) {
+// 					console.error('Error saving user:', error);
+// 				}
+// 			}
+// 		};
+// 		saveUser();
+// 	}, [currentUser, isLoading]);
+
+// 	// Get reports for current user
+// 	const getUserReports = useCallback(
+// 		(userId = currentUser?.id) => {
+// 			if (!userId) return [];
+// 			return reports.filter((r) => r.userId === userId);
+// 		},
+// 		[reports, currentUser],
+// 	);
+
+// 	// Get reports by status
+// 	const getReportsByStatus = useCallback(
+// 		(status) => {
+// 			if (status === 'all') return reports;
+// 			return reports.filter((r) => r.status === status);
+// 		},
+// 		[reports],
+// 	);
+
+// 	// Get reports by department
+// 	const getReportsByDepartment = useCallback(
+// 		(department) => {
+// 			if (department === 'all') return reports;
+// 			return reports.filter((r) => r.category === department);
+// 		},
+// 		[reports],
+// 	);
+
+// 	// Get single report
+// 	const getReport = useCallback(
+// 		(id) => {
+// 			return reports.find((r) => r.id === id);
+// 		},
+// 		[reports],
+// 	);
+
+// 	// Helper to map status to translation key
+// 	const getStatusKey = (status) => {
+// 		const map = {
+// 			Pending: 'pending',
+// 			Assigned: 'assigned',
+// 			'In Progress': 'inProgress',
+// 			Resolved: 'resolved',
+// 			Closed: 'closed',
+// 		};
+// 		return map[status] || status.toLowerCase();
+// 	};
+
+// 	// Helper to map category/department to translation key
+// 	const getCategoryKey = (cat) => {
+// 		const map = {
+// 			Streetlights: 'streetLights',
+// 			Garbage: 'garbageCollection',
+// 			Water: 'waterSupply',
+// 			Roads: 'roadMaintenance',
+// 			Gas: 'gasProblems',
+// 			Electricity: 'electricity',
+// 			Sewerage: 'sewerageIssues',
+// 			'Animal Rescue': 'animalRescue',
+// 			'Public Safety': 'publicSafety',
+// 		};
+// 		return map[cat] || cat.toLowerCase();
+// 	};
+
+// 	// Add notification
+// 	const addNotification = useCallback((notification) => {
+// 		const newNotification = {
+// 			id: Date.now(),
+// 			time: new Date().toISOString(),
+// 			read: false,
+// 			...notification,
+// 		};
+// 		setNotifications((prev) => [newNotification, ...prev]);
+// 	}, []);
+
+// 	// Mark notification as read
+// 	const markNotificationAsRead = useCallback((id) => {
+// 		setNotifications((prev) =>
+// 			prev.map((n) => (n.id === id ? { ...n, read: true } : n)),
+// 		);
+// 	}, []);
+
+// 	// Mark all notifications as read
+// 	const markAllNotificationsAsRead = useCallback(() => {
+// 		setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+// 	}, []);
+
+// 	const addReport = useCallback(
+// 		async (reportData) => {
+// 			try {
+// 				// Save to Firestore
+// 				const firestoreId = await createReportService(reportData);
+
+// 				// Save to local state (for citizen view)
+// 				const newReport = {
+// 					id: firestoreId, // Use Firestore ID
+// 					...reportData,
+// 					createdAt: new Date().toISOString().split('T')[0],
+// 					status: 'Pending',
+// 					timeline: [
+// 						{
+// 							status: 'Pending',
+// 							date: new Date().toLocaleString(),
+// 							note: t('submittedBy'),
+// 						},
+// 					],
+// 				};
+
+// 				setReports((prev) => [newReport, ...prev]);
+
+// 				addNotification({
+// 					title: 'Report Submitted',
+// 					message: `Your report about ${reportData.title} has been submitted successfully.`,
+// 					type: 'success',
+// 				});
+
+// 				return firestoreId;
+// 			} catch (error) {
+// 				console.error('Error adding report:', error);
+// 				throw error;
+// 			}
+// 		},
+// 		[currentUser, addNotification, t],
+// 	);
+
+// 	const login = async (userData) => {
+// 		setCurrentUser(userData);
+// 		if (userData.uid) {
+// 			const isAdminRole = await verifyAdminRole(userData.uid);
+// 			setIsAdmin(isAdminRole);
+// 		}
+// 	};
+
+// 	const logout = async () => {
+// 		setCurrentUser(null);
+// 		setIsAdmin(false);
+// 		await AsyncStorage.removeItem(CURRENT_USER_STORAGE_KEY);
+// 	};
+
+// 	return (
+// 		<AppContext.Provider
+// 			value={{
+// 				reports,
+// 				notifications,
+// 				currentUser,
+// 				setCurrentUser,
+// 				isAdmin,
+// 				setIsAdmin,
+// 				isLoading,
+// 				getUserReports,
+// 				getReportsByStatus,
+// 				getReportsByDepartment,
+// 				getReport,
+// 				getStatusKey,
+// 				getCategoryKey,
+// 				addNotification,
+// 				markNotificationAsRead,
+// 				markAllNotificationsAsRead,
+// 				addReport,
+// 				login,
+// 				logout,
+// 			}}
+// 		>
+// 			{children}
+// 		</AppContext.Provider>
+// 	);
+// };
+
+// export default AppContext;
 
