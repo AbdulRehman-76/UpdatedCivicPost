@@ -271,8 +271,6 @@ export default function AdminReportsScreen() {
           })}
         </View>
       )}
-
-      {/* Reports List */}
       <FlatList
         data={filteredReports}
         renderItem={renderReport}
