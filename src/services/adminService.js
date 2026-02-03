@@ -1,4 +1,4 @@
-import { db } from '../config/firebase';
+import { db, auth } from '../config/firebase';
 import {
   collection,
   doc,
@@ -13,6 +13,7 @@ import {
   addDoc,
   arrayUnion,
 } from 'firebase/firestore';
+import { createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 
 
 // ─────────────────────────────────────────────
@@ -36,8 +37,6 @@ export const verifyAdminRole = async (uid) => {
 // 2. USER FETCHING
 // ─────────────────────────────────────────────
 
-// Fetch ANY user by their doc ID (works for citizens, dept users, admins)
-// Used by report-detail to load the citizen who submitted the report
 export const getUserById = async (uid) => {
   try {
     const userDoc = await getDoc(doc(db, 'users', uid));
@@ -134,7 +133,6 @@ export const getDepartments = async () => {
   }
 };
 
-// departmentData shape: { name, iconName, color }
 export const addDepartment = async (departmentData) => {
   try {
     const docRef = await addDoc(collection(db, 'departments'), {
@@ -149,8 +147,6 @@ export const addDepartment = async (departmentData) => {
   }
 };
 
-// Update existing department fields
-// updateData shape: { name?, iconName?, color?, isActive? }
 export const updateDepartment = async (deptId, updateData) => {
   try {
     await updateDoc(doc(db, 'departments', deptId), {
@@ -163,7 +159,6 @@ export const updateDepartment = async (deptId, updateData) => {
   }
 };
 
-// Permanently delete a department
 export const deleteDepartment = async (deptId) => {
   try {
     await deleteDoc(doc(db, 'departments', deptId));
@@ -175,10 +170,10 @@ export const deleteDepartment = async (deptId) => {
 
 
 // ─────────────────────────────────────────────
-// 6. DEPARTMENT USER MANAGEMENT
+// 6. DEPARTMENT USER MANAGEMENT (WITH FIREBASE AUTH)
 // ─────────────────────────────────────────────
 
-// Pass null to get ALL department users, or a deptId to filter
+// Get department users (with optional filter)
 export const getDepartmentUsers = async (departmentId) => {
   try {
     let q = query(
@@ -196,37 +191,120 @@ export const getDepartmentUsers = async (departmentId) => {
   }
 };
 
-// Create a new department user profile
-// userData shape: { name, phone, email?, departmentId }
-export const createDepartmentUser = async (userData) => {
+// Generate a temporary password (simple but secure enough for first login)
+const generateTempPassword = () => {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#$%';
+  let password = 'Temp@';
+  for (let i = 0; i < 8; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
+};
+
+/**
+ * Create a new department user
+ * 1. Creates Firebase Auth account with email + temp password
+ * 2. Gets the UID from Firebase Auth
+ * 3. Creates Firestore document with that UID
+ * 
+ * userData shape: { fullName, email, phone, departmentId, createdBy (admin uid) }
+ * Returns: { uid, tempPassword }
+ */
+export const createDepartmentUser = async (userData, currentAdminUid) => {
   try {
-    const newDocRef = doc(collection(db, 'users'));
-    await setDoc(newDocRef, {
-      name:         userData.name,
-      phone:        userData.phone,
-      email:        userData.email || null,
+    // Generate temporary password
+    const tempPassword = generateTempPassword();
+
+    // Step 1: Create Firebase Auth account
+    const userCredential = await createUserWithEmailAndPassword(
+      auth,
+      userData.email,
+      tempPassword
+    );
+    
+    const uid = userCredential.user.uid;
+
+    // Step 2: Create Firestore document
+    await setDoc(doc(db, 'users', uid), {
+      fullName:     userData.fullName,
+      email:        userData.email,
+      phone:        userData.phone || null,
       departmentId: userData.departmentId,
       role:         'departmentUser',
       status:       'offline',
+      isActive:     true,
+      createdBy:    currentAdminUid,
       createdAt:    serverTimestamp(),
+      lastActive:   null,
     });
-    return newDocRef.id;
+
+    return { uid, tempPassword };
   } catch (error) {
     console.error('Error creating department user:', error);
+    
+    // Handle Firebase Auth errors
+    if (error.code === 'auth/email-already-in-use') {
+      throw new Error('This email is already registered');
+    } else if (error.code === 'auth/invalid-email') {
+      throw new Error('Invalid email address');
+    } else if (error.code === 'auth/weak-password') {
+      throw new Error('Password is too weak');
+    }
+    
     throw error;
   }
 };
 
-// Edit an existing department user
-// updateData shape: { name?, phone?, email?, departmentId?, status? }
+/**
+ * Update existing department user
+ * Can update: fullName, phone, departmentId
+ * CANNOT update: email (would require Auth re-authentication)
+ */
 export const updateDepartmentUser = async (uid, updateData) => {
   try {
+    const allowedFields = {};
+    
+    if (updateData.fullName) allowedFields.fullName = updateData.fullName;
+    if (updateData.phone) allowedFields.phone = updateData.phone;
+    if (updateData.departmentId) allowedFields.departmentId = updateData.departmentId;
+    if (updateData.status) allowedFields.status = updateData.status;
+
     await updateDoc(doc(db, 'users', uid), {
-      ...updateData,
+      ...allowedFields,
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
     console.error('Error updating department user:', error);
+    throw error;
+  }
+};
+
+/**
+ * Toggle user active/inactive status
+ * Instead of deleting, we just disable the account
+ */
+export const toggleUserActive = async (uid, isActive) => {
+  try {
+    await updateDoc(doc(db, 'users', uid), {
+      isActive:  isActive,
+      status:    isActive ? 'offline' : 'disabled',
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    console.error('Error toggling user status:', error);
+    throw error;
+  }
+};
+
+/**
+ * Send password reset email to department user
+ * They can set their own new password
+ */
+export const resetUserPassword = async (email) => {
+  try {
+    await sendPasswordResetEmail(auth, email);
+  } catch (error) {
+    console.error('Error sending password reset:', error);
     throw error;
   }
 };

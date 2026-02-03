@@ -10,46 +10,46 @@ import {
   Modal,
   ActivityIndicator,
   ScrollView,
+  Switch,
+  Clipboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useLanguage } from '../../src/context/LanguageContext';
+import { useApp } from '../../src/context/AppContext';
 import {
   getDepartments,
   getDepartmentUsers,
   createDepartmentUser,
   updateDepartmentUser,
+  toggleUserActive,
+  resetUserPassword,
 } from '../../src/services/adminService';
 import { getDeptIcon } from '../../src/utils/adminUtils';
 
-// Status options an admin can assign to a department user
 const USER_STATUS_OPTIONS = ['offline', 'active', 'working'];
 
 export default function UsersScreen() {
   const router = useRouter();
-  const { t } = useLanguage();
+  const { currentUser } = useApp();
 
-  const [users, setUsers]             = useState([]);
+  const [users, setUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [selectedDept, setSelectedDept] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
 
-  const [isLoading, setIsLoading]     = useState(true);
-  const [submitting, setSubmitting]   = useState(false);
+  // Modal control
+  const [modalMode, setModalMode] = useState(null); // null | 'add' | 'edit' | 'view'
+  const [selectedUser, setSelectedUser] = useState(null);
 
-  // ── Modal control ──
-  // mode: null | 'add' | 'edit'
-  const [modalMode, setModalMode]     = useState(null);
-  const [editingUser, setEditingUser] = useState(null); // the full user object when editing
-
-  // ── Form fields (shared by add & edit) ──
-  const [formName,   setFormName]   = useState('');
-  const [formPhone,  setFormPhone]  = useState('');
-  const [formEmail,  setFormEmail]  = useState('');
-  const [formDept,   setFormDept]   = useState(null);   // dept id
+  // Form fields
+  const [formName, setFormName] = useState('');
+  const [formEmail, setFormEmail] = useState('');
+  const [formPhone, setFormPhone] = useState('');
+  const [formDept, setFormDept] = useState(null);
   const [formStatus, setFormStatus] = useState('offline');
 
-  // ── Load ──
   useEffect(() => { loadDepartments(); }, []);
   useEffect(() => { loadUsers(); }, [selectedDept]);
 
@@ -57,7 +57,9 @@ export default function UsersScreen() {
     try {
       const depts = await getDepartments();
       setDepartments(depts);
-    } catch (e) { console.error('Depts error:', e); }
+    } catch (e) {
+      console.error('Depts error:', e);
+    }
   };
 
   const loadUsers = useCallback(async () => {
@@ -73,74 +75,110 @@ export default function UsersScreen() {
     }
   }, [selectedDept]);
 
-  // ── Open Add modal (blank form) ──
+  // ── Open Add Modal ──
   const openAddModal = () => {
     setFormName('');
-    setFormPhone('');
     setFormEmail('');
+    setFormPhone('');
     setFormDept(null);
     setFormStatus('offline');
-    setEditingUser(null);
+    setSelectedUser(null);
     setModalMode('add');
   };
 
-  // ── Open Edit modal (pre-fill form with selected user) ──
+  // ── Open Edit Modal ──
   const openEditModal = (user) => {
-    setFormName(user.name || '');
-    setFormPhone(user.phone || '');
+    setFormName(user.fullName || '');
     setFormEmail(user.email || '');
+    setFormPhone(user.phone || '');
     setFormDept(user.departmentId || null);
     setFormStatus(user.status || 'offline');
-    setEditingUser(user);
+    setSelectedUser(user);
     setModalMode('edit');
   };
 
-  // ── Close modal & reset ──
+  // ── Close Modal ──
   const closeModal = () => {
     setModalMode(null);
-    setEditingUser(null);
+    setSelectedUser(null);
   };
 
-  // ── Submit: Create ──
+  // ── Create User ──
   const handleCreate = async () => {
-    if (!formName.trim() || !formPhone.trim() || !formDept) {
-      Alert.alert('Validation', 'Please fill in name, phone, and select a department.');
+    if (!formName.trim()) {
+      Alert.alert('Required', 'Please enter full name');
       return;
     }
+    if (!formEmail.trim()) {
+      Alert.alert('Required', 'Please enter email address');
+      return;
+    }
+    if (!formDept) {
+      Alert.alert('Required', 'Please select a department');
+      return;
+    }
+
     setSubmitting(true);
     try {
-      await createDepartmentUser({
-        name:         formName.trim(),
-        phone:        formPhone.trim(),
-        email:        formEmail.trim(),
-        departmentId: formDept,
-      });
+      const result = await createDepartmentUser(
+        {
+          fullName: formName.trim(),
+          email: formEmail.trim().toLowerCase(),
+          phone: formPhone.trim(),
+          departmentId: formDept,
+        },
+        currentUser.uid
+      );
+
       closeModal();
       loadUsers();
-      Alert.alert('Success', 'User created successfully.');
+
+      // Show success with temp password
+      Alert.alert(
+        '✅ User Created Successfully',
+        `Account created for ${formEmail}.\n\n` +
+        `Temporary Password:\n${result.tempPassword}\n\n` +
+        `📋 Copy this password and share it securely with the user.\n\n` +
+        `⚠️ User should change this password after first login.`,
+        [
+          {
+            text: 'Copy Password',
+            onPress: () => {
+              Clipboard.setString(result.tempPassword);
+              Alert.alert('Copied', 'Password copied to clipboard');
+            }
+          },
+          { text: 'OK' }
+        ]
+      );
     } catch (e) {
       console.error('Create error:', e);
-      Alert.alert('Error', 'Failed to create user.');
+      Alert.alert('Error', e.message || 'Failed to create user.');
     } finally {
       setSubmitting(false);
     }
   };
 
-  // ── Submit: Update ──
+  // ── Update User ──
   const handleUpdate = async () => {
-    if (!formName.trim() || !formPhone.trim() || !formDept) {
-      Alert.alert('Validation', 'Please fill in name, phone, and select a department.');
+    if (!formName.trim()) {
+      Alert.alert('Required', 'Please enter full name');
       return;
     }
+    if (!formDept) {
+      Alert.alert('Required', 'Please select a department');
+      return;
+    }
+
     setSubmitting(true);
     try {
-      await updateDepartmentUser(editingUser.id, {
-        name:         formName.trim(),
-        phone:        formPhone.trim(),
-        email:        formEmail.trim(),
+      await updateDepartmentUser(selectedUser.id, {
+        fullName: formName.trim(),
+        phone: formPhone.trim(),
         departmentId: formDept,
-        status:       formStatus,
+        status: formStatus,
       });
+
       closeModal();
       loadUsers();
       Alert.alert('Success', 'User updated successfully.');
@@ -150,6 +188,55 @@ export default function UsersScreen() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // ── Toggle Active/Inactive ──
+  const handleToggleActive = async (user) => {
+    const newStatus = !user.isActive;
+    const action = newStatus ? 'activate' : 'deactivate';
+
+    Alert.alert(
+      `${action.charAt(0).toUpperCase() + action.slice(1)} User`,
+      `Are you sure you want to ${action} ${user.fullName}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: action.charAt(0).toUpperCase() + action.slice(1),
+          style: newStatus ? 'default' : 'destructive',
+          onPress: async () => {
+            try {
+              await toggleUserActive(user.id, newStatus);
+              loadUsers();
+              Alert.alert('Success', `User ${action}d successfully.`);
+            } catch (e) {
+              Alert.alert('Error', `Failed to ${action} user.`);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // ── Reset Password ──
+  const handleResetPassword = async (user) => {
+    Alert.alert(
+      'Reset Password',
+      `Send password reset email to ${user.email}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send Email',
+          onPress: async () => {
+            try {
+              await resetUserPassword(user.email);
+              Alert.alert('Success', `Password reset email sent to ${user.email}`);
+            } catch (e) {
+              Alert.alert('Error', 'Failed to send password reset email.');
+            }
+          }
+        }
+      ]
+    );
   };
 
   // ── Helpers ──
@@ -166,31 +253,29 @@ export default function UsersScreen() {
   // ── Render User Card ──
   const renderUser = ({ item }) => {
     const deptColor = getDeptColorForUser(item.departmentId);
-    const isActive  = item.status === 'active' || item.status === 'working';
+    const isActive = item.status === 'active' || item.status === 'working';
 
     return (
       <TouchableOpacity
-        style={styles.card}
+        style={[styles.card, !item.isActive && styles.cardInactive]}
         onPress={() => openEditModal(item)}
         activeOpacity={0.7}
       >
-        {/* Avatar */}
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{item.name?.charAt(0)?.toUpperCase() || 'U'}</Text>
+          <Text style={styles.avatarText}>{item.fullName?.charAt(0)?.toUpperCase() || 'U'}</Text>
           <View style={[styles.onlineDot, { backgroundColor: isActive ? '#22c55e' : '#475569' }]} />
         </View>
 
-        {/* Info */}
         <View style={styles.info}>
-          <Text style={styles.userName}>{item.name}</Text>
+          <Text style={styles.userName}>{item.fullName}</Text>
           <View style={styles.deptTag}>
             <View style={[styles.deptTagDot, { backgroundColor: deptColor }]} />
-            <Text style={[styles.deptTagText, { color: deptColor }]}>{getDeptName(item.departmentId)}</Text>
+            <Text style={[styles.deptTagText, { backgroundColor: deptColor }]}>{getDeptName(item.departmentId)}</Text>
           </View>
-          <Text style={styles.userPhone}>{item.phone || '—'}</Text>
+          <Text style={styles.userEmail}>{item.email}</Text>
+          {!item.isActive && <Text style={styles.inactiveLabel}>Deactivated</Text>}
         </View>
 
-        {/* Edit chevron + status */}
         <View style={styles.cardRight}>
           <Text style={[styles.statusLabel, { color: isActive ? '#22c55e' : '#64748b' }]}>
             {item.status || 'Offline'}
@@ -201,7 +286,7 @@ export default function UsersScreen() {
     );
   };
 
-  // ──────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -226,7 +311,7 @@ export default function UsersScreen() {
 
         {departments.map((dept) => {
           const active = selectedDept === dept.id;
-          const icon   = getDeptIcon(dept.name);
+          const icon = getDeptIcon(dept.name);
           return (
             <TouchableOpacity
               key={dept.id}
@@ -256,7 +341,7 @@ export default function UsersScreen() {
       )}
 
       {/* ════════════════════════════════════════
-          MODAL — shared layout for Add & Edit
+          MODAL — Add/Edit User
           ════════════════════════════════════════ */}
       <Modal
         animationType="slide"
@@ -266,11 +351,10 @@ export default function UsersScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-
-            {/* Title row */}
+            {/* Header */}
             <View style={styles.modalHeaderRow}>
               <Text style={styles.modalTitle}>
-                {modalMode === 'edit' ? 'Edit User' : 'Add User'}
+                {modalMode === 'edit' ? 'Edit User' : 'Add New User'}
               </Text>
               <TouchableOpacity onPress={closeModal}>
                 <Ionicons name="close" size={22} color="#64748b" />
@@ -278,20 +362,36 @@ export default function UsersScreen() {
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} style={styles.modalScroll}>
-
-              {/* Name */}
-              <Text style={styles.inputLabel}>Full Name</Text>
+              {/* Full Name */}
+              <Text style={styles.inputLabel}>Full Name *</Text>
               <TextInput
                 style={styles.input}
-                placeholder="John Doe"
+                placeholder="Ahmed Khan"
                 placeholderTextColor="#64748b"
                 value={formName}
                 onChangeText={setFormName}
                 autoCapitalize="words"
+                editable={!submitting}
               />
 
+              {/* Email */}
+              <Text style={styles.inputLabel}>Email Address *</Text>
+              <TextInput
+                style={[styles.input, modalMode === 'edit' && styles.inputDisabled]}
+                placeholder="ahmed@example.com"
+                placeholderTextColor="#64748b"
+                value={formEmail}
+                onChangeText={setFormEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                editable={modalMode === 'add' && !submitting}
+              />
+              {modalMode === 'edit' && (
+                <Text style={styles.helperText}>Email cannot be changed after creation</Text>
+              )}
+
               {/* Phone */}
-              <Text style={styles.inputLabel}>Phone Number</Text>
+              <Text style={styles.inputLabel}>Phone Number (Optional)</Text>
               <TextInput
                 style={styles.input}
                 placeholder="+92 300 0000000"
@@ -299,31 +399,21 @@ export default function UsersScreen() {
                 value={formPhone}
                 onChangeText={setFormPhone}
                 keyboardType="phone-pad"
+                editable={!submitting}
               />
 
-              {/* Email */}
-              <Text style={styles.inputLabel}>Email (optional)</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="john@example.com"
-                placeholderTextColor="#64748b"
-                value={formEmail}
-                onChangeText={setFormEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-
-              {/* Department Picker */}
-              <Text style={styles.inputLabel}>Department</Text>
+              {/* Department */}
+              <Text style={styles.inputLabel}>Department *</Text>
               <ScrollView style={styles.deptPicker} nestedScrollEnabled>
                 {departments.map((dept) => {
                   const active = formDept === dept.id;
-                  const icon   = getDeptIcon(dept.name);
+                  const icon = getDeptIcon(dept.name);
                   return (
                     <TouchableOpacity
                       key={dept.id}
                       style={[styles.deptPickerItem, active && styles.deptPickerItemActive]}
                       onPress={() => setFormDept(dept.id)}
+                      disabled={submitting}
                     >
                       <View style={[styles.deptPickerIconBg, { backgroundColor: icon.color + '22' }]}>
                         <Ionicons name={icon.iconName} size={16} color={icon.color} />
@@ -335,7 +425,7 @@ export default function UsersScreen() {
                 })}
               </ScrollView>
 
-              {/* Status — only shown in Edit mode */}
+              {/* Status (Edit mode only) */}
               {modalMode === 'edit' && (
                 <>
                   <Text style={styles.inputLabel}>Status</Text>
@@ -348,6 +438,7 @@ export default function UsersScreen() {
                           key={s}
                           style={[styles.statusChip, active && styles.statusChipActive]}
                           onPress={() => setFormStatus(s)}
+                          disabled={submitting}
                         >
                           <View style={[styles.statusChipDot, { backgroundColor: dotColor }]} />
                           <Text style={[styles.statusChipText, active && styles.statusChipTextActive]}>
@@ -360,9 +451,9 @@ export default function UsersScreen() {
                 </>
               )}
 
-              {/* Buttons */}
+              {/* Action Buttons */}
               <View style={styles.modalButtons}>
-                <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={closeModal}>
+                <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={closeModal} disabled={submitting}>
                   <Text style={styles.buttonText}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -374,11 +465,43 @@ export default function UsersScreen() {
                     <ActivityIndicator color="#fff" size="small" />
                   ) : (
                     <Text style={styles.buttonText}>
-                      {modalMode === 'edit' ? 'Update' : 'Create'}
+                      {modalMode === 'edit' ? 'Update' : 'Create User'}
                     </Text>
                   )}
                 </TouchableOpacity>
               </View>
+
+              {/* Edit-Only Actions */}
+              {modalMode === 'edit' && selectedUser && (
+                <View style={styles.extraActions}>
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={() => handleResetPassword(selectedUser)}
+                    disabled={submitting}
+                  >
+                    <Ionicons name="key-outline" size={18} color="#3b82f6" />
+                    <Text style={[styles.actionButtonText, { color: '#3b82f6' }]}>Reset Password</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={() => {
+                      closeModal();
+                      handleToggleActive(selectedUser);
+                    }}
+                    disabled={submitting}
+                  >
+                    <Ionicons
+                      name={selectedUser.isActive ? 'close-circle-outline' : 'checkmark-circle-outline'}
+                      size={18}
+                      color={selectedUser.isActive ? '#ef4444' : '#22c55e'}
+                    />
+                    <Text style={[styles.actionButtonText, { color: selectedUser.isActive ? '#ef4444' : '#22c55e' }]}>
+                      {selectedUser.isActive ? 'Deactivate User' : 'Activate User'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </ScrollView>
           </View>
         </View>
@@ -391,65 +514,74 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f172a' },
 
   // Header
-  header:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderBottomColor: '#1e293b' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderBottomColor: '#1e293b' },
   backButton: { padding: 8 },
-  title:      { fontSize: 20, fontWeight: 'bold', color: '#fff' },
-  addButton:  { width: 38, height: 38, borderRadius: 19, backgroundColor: '#8b5cf6', alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 20, fontWeight: 'bold', color: '#fff' },
+  addButton: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#8b5cf6', alignItems: 'center', justifyContent: 'center' },
 
   // Filter chips
   filterScroll: { borderBottomWidth: 1, borderBottomColor: '#1e293b' },
-  filterList:   { paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
-  chip:         { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#334155' },
-  chipActive:   { backgroundColor: '#8b5cf6', borderColor: '#8b5cf6' },
-  chipText:     { color: '#94a3b8', fontSize: 13, fontWeight: '500' },
+  filterList: { paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
+  chip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#334155' },
+  chipActive: { backgroundColor: '#8b5cf6', borderColor: '#8b5cf6' },
+  chipText: { color: '#94a3b8', fontSize: 13, fontWeight: '500' },
   chipTextActive: { color: '#fff' },
 
   // List
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  list:      { padding: 16 },
-  card:      { backgroundColor: '#1e293b', borderRadius: 14, padding: 14, marginBottom: 10, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#334155' },
-  avatar:    { width: 48, height: 48, borderRadius: 24, backgroundColor: '#334155', alignItems: 'center', justifyContent: 'center', marginRight: 14, position: 'relative' },
-  avatarText:{ color: '#fff', fontSize: 19, fontWeight: 'bold' },
+  list: { padding: 16 },
+  card: { backgroundColor: '#1e293b', borderRadius: 14, padding: 14, marginBottom: 10, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#334155' },
+  cardInactive: { opacity: 0.6 },
+  avatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#334155', alignItems: 'center', justifyContent: 'center', marginRight: 14, position: 'relative' },
+  avatarText: { color: '#fff', fontSize: 19, fontWeight: 'bold' },
   onlineDot: { position: 'absolute', bottom: 1, right: 1, width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: '#0f172a' },
-  info:      { flex: 1 },
-  userName:  { color: '#fff', fontSize: 16, fontWeight: '600', marginBottom: 3 },
-  deptTag:   { flexDirection: 'row', alignItems: 'center', marginBottom: 3 },
-  deptTagDot:{ width: 7, height: 7, borderRadius: 4, marginRight: 5 },
-  deptTagText:{ fontSize: 12, fontWeight: '500' },
-  userPhone: { color: '#64748b', fontSize: 12 },
+  info: { flex: 1 },
+  userName: { color: '#fff', fontSize: 16, fontWeight: '600', marginBottom: 3 },
+  deptTag: { flexDirection: 'row', alignItems: 'center', marginBottom: 3 },
+  deptTagDot: { width: 7, height: 7, borderRadius: 4, marginRight: 5 },
+  deptTagText: { fontSize: 12, fontWeight: '500' },
+  userEmail: { color: '#64748b', fontSize: 12 },
+  inactiveLabel: { color: '#ef4444', fontSize: 11, fontWeight: '600', marginTop: 2 },
   cardRight: { alignItems: 'flex-end' },
-  statusLabel:{ fontSize: 12, fontWeight: '600', textTransform: 'capitalize' },
+  statusLabel: { fontSize: 12, fontWeight: '600', textTransform: 'capitalize' },
   emptyText: { color: '#64748b', textAlign: 'center', marginTop: 48, fontSize: 15 },
 
   // Modal
-  modalOverlay:  { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
-  modalContent:  { backgroundColor: '#1e293b', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: '88%' },
-  modalHeaderRow:{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  modalTitle:    { color: '#fff', fontSize: 20, fontWeight: 'bold' },
-  modalScroll:   { },
-  inputLabel:    { color: '#94a3b8', fontSize: 13, fontWeight: '500', marginBottom: 5, marginTop: 2 },
-  input:         { backgroundColor: '#334155', borderRadius: 10, padding: 12, color: '#fff', fontSize: 15, marginBottom: 14 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: '#1e293b', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: '90%' },
+  modalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  modalTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
+  modalScroll: {},
+  inputLabel: { color: '#94a3b8', fontSize: 13, fontWeight: '500', marginBottom: 5, marginTop: 2 },
+  input: { backgroundColor: '#334155', borderRadius: 10, padding: 12, color: '#fff', fontSize: 15, marginBottom: 14 },
+  inputDisabled: { opacity: 0.5 },
+  helperText: { color: '#64748b', fontSize: 11, marginTop: -10, marginBottom: 10 },
 
-  // Dept picker inside modal
-  deptPicker:            { maxHeight: 160, marginBottom: 16, backgroundColor: '#334155', borderRadius: 10, overflow: 'hidden' },
-  deptPickerItem:        { flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: '#1e293b' },
-  deptPickerItemActive:  { backgroundColor: '#475569' },
-  deptPickerIconBg:      { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginRight: 10 },
-  deptPickerText:        { color: '#cbd5e1', fontSize: 14, flex: 1 },
-  deptPickerTextActive:  { color: '#fff', fontWeight: '600' },
+  // Dept picker
+  deptPicker: { maxHeight: 160, marginBottom: 16, backgroundColor: '#334155', borderRadius: 10, overflow: 'hidden' },
+  deptPickerItem: { flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: '#1e293b' },
+  deptPickerItemActive: { backgroundColor: '#475569' },
+  deptPickerIconBg: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginRight: 10 },
+  deptPickerText: { color: '#cbd5e1', fontSize: 14, flex: 1 },
+  deptPickerTextActive: { color: '#fff', fontWeight: '600' },
 
-  // Status chips (edit mode only)
-  statusRow:             { flexDirection: 'row', gap: 8, marginBottom: 16 },
-  statusChip:            { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: '#334155', borderWidth: 1, borderColor: '#475569' },
-  statusChipActive:      { backgroundColor: '#8b5cf6', borderColor: '#8b5cf6' },
-  statusChipDot:         { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
-  statusChipText:        { color: '#94a3b8', fontSize: 13, fontWeight: '500' },
-  statusChipTextActive:  { color: '#fff' },
+  // Status chips
+  statusRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
+  statusChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: '#334155', borderWidth: 1, borderColor: '#475569' },
+  statusChipActive: { backgroundColor: '#8b5cf6', borderColor: '#8b5cf6' },
+  statusChipDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
+  statusChipText: { color: '#94a3b8', fontSize: 13, fontWeight: '500' },
+  statusChipTextActive: { color: '#fff' },
 
   // Buttons
-  modalButtons:  { flexDirection: 'row', gap: 12, marginTop: 4 },
-  modalButton:   { flex: 1, padding: 14, borderRadius: 10, alignItems: 'center' },
-  cancelButton:  { backgroundColor: '#475569' },
-  saveButton:    { backgroundColor: '#8b5cf6' },
-  buttonText:    { color: '#fff', fontWeight: '600', fontSize: 16 },
+  modalButtons: { flexDirection: 'row', gap: 12, marginTop: 4 },
+  modalButton: { flex: 1, padding: 14, borderRadius: 10, alignItems: 'center' },
+  cancelButton: { backgroundColor: '#475569' },
+  saveButton: { backgroundColor: '#8b5cf6' },
+  buttonText: { color: '#fff', fontWeight: '600', fontSize: 16 },
+
+  // Extra actions
+  extraActions: { marginTop: 20, gap: 10 },
+  actionButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 14, borderRadius: 10, borderWidth: 1, borderColor: '#334155', backgroundColor: '#1e293b' },
+  actionButtonText: { marginLeft: 8, fontSize: 15, fontWeight: '600' },
 });
