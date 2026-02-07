@@ -172,6 +172,7 @@ export const AppProvider = ({ children }) => {
 	// Get single report
 	const getReport = useCallback(
 		(id) => {
+			console.log(`Id: ${id}`);
 			return reports.find((r) => r.id === id);
 		},
 		[reports],
@@ -278,6 +279,7 @@ export const AppProvider = ({ children }) => {
 	const logout = async () => {
 		setCurrentUser(null);
 		setIsAdmin(false);
+		console.log(`Current User Key: ${CURRENT_USER_STORAGE_KEY}`);
 		await AsyncStorage.removeItem(CURRENT_USER_STORAGE_KEY);
 	};
 

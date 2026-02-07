@@ -34,16 +34,59 @@ export const getUserProfile = async (uid) => {
   }
 };
 
-// Update User Profile
-export const updateUserProfile = async (uid, data) => {
+export const updateUserProfile = async (userId, updateData) => {
   try {
-    await updateDoc(doc(db, 'users', uid), {
-      ...data,
-      updatedAt: serverTimestamp(),
-    });
-    return true;
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+
+    const updates = {};
+
+    // Validate and add name
+    if (updateData.name !== undefined) {
+      const trimmedName = updateData.name.trim();
+      if (!trimmedName) {
+        throw new Error('Name cannot be empty');
+      }
+      updates.name = trimmedName;
+    }
+
+    // Validate and add phone
+    if (updateData.phone !== undefined) {
+      const trimmedPhone = updateData.phone.trim();
+      if (!trimmedPhone) {
+        throw new Error('Phone number cannot be empty');
+      }
+      updates.phone = trimmedPhone;
+    }
+
+    // Add timestamp
+    updates.updatedAt = serverTimestamp();
+
+    // Update user document
+    const userRef = doc(db, 'users', userId);
+    await updateDoc(userRef, updates);
+
+    return {
+      success: true,
+      message: 'Profile updated successfully'
+    };
+
   } catch (error) {
-    console.error('Error updating user profile:', error);
-    throw error;
+    console.error('Error updating profile:', error);
+    throw new Error(error.message || 'Failed to update profile');
   }
 };
+// // Update User Profile
+// export const updateUserProfile = async (uid, data) => {
+//   try {
+//     await updateDoc(doc(db, 'users', uid), {
+//       ...data,
+//       updatedAt: serverTimestamp(),
+//     });
+//     return true;
+//   } catch (error) {
+//     console.error('Error updating user profile:', error);
+//     throw error;
+//   }
+// };

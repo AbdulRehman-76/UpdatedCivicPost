@@ -3,7 +3,7 @@ import {
   View,
   Text,
   StyleSheet,
- ScrollView,
+  ScrollView,
   TouchableOpacity,
   FlatList,
   ActivityIndicator,
@@ -30,6 +30,7 @@ export default function ReportsScreen() {
   }, [userReports, activeFilter]);
 
   const handleReportPress = (reportId) => {
+    console.log(`ID: ${reportId}`);
     router.push({ pathname: '/(user)/report-detail', params: { id: reportId } });
   };
 
