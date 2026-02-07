@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, Animated, Dimensions, StatusBar } from 'react-native';
 
 const { width } = Dimensions.get('window');
 
@@ -9,6 +9,9 @@ export default function CustomSplashScreen() {
   const loaderAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    // Ensure status bar is visible but themed during splash
+    StatusBar.setBarStyle('dark-content');
+    
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -22,7 +25,7 @@ export default function CustomSplashScreen() {
       }),
       Animated.timing(loaderAnim, {
         toValue: 1,
-        duration: 2500,
+        duration: 3000,
         useNativeDriver: false,
       }),
     ]).start();

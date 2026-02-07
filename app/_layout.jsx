@@ -8,21 +8,34 @@ import { LanguageProvider } from '../src/context/LanguageContext';
 import CustomSplashScreen from './components/CustomSplashScreen';
 
 // Keep the splash screen visible while we fetch resources
-SplashScreen.preventAutoHideAsync();
+SplashScreen.preventAutoHideAsync().catch(() => {
+  /* reloading the app might cause this to error */
+});
 
 function RootLayoutNav() {
   const { isLoading } = useApp();
   const [appReady, setAppReady] = useState(false);
 
   useEffect(() => {
-    if (!isLoading) {
-      // Show splash screen for at least 3 seconds
-      const timer = setTimeout(() => {
-        setAppReady(true);
-        SplashScreen.hideAsync();
-      }, 3000);
-      return () => clearTimeout(timer);
+    async function prepare() {
+      try {
+        if (!isLoading) {
+          // Show splash screen for at least 3 seconds
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          setAppReady(true);
+        }
+      } catch (e) {
+        console.warn(e);
+      } finally {
+        if (!isLoading) {
+          await SplashScreen.hideAsync().catch(() => {
+            /* ignore errors */
+          });
+        }
+      }
     }
+
+    prepare();
   }, [isLoading]);
 
   if (!appReady) {

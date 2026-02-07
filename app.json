@@ -46,7 +46,8 @@
       "expo-image-picker",
       "expo-location",
       "expo-font",
-      "expo-asset"
+      "expo-asset",
+      "expo-splash-screen"
     ]
   }
 }
