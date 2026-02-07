@@ -8,7 +8,10 @@ import React, {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initialReports } from '../data/reports';
 import { useLanguage } from './LanguageContext';
-import { createReport as createReportService } from '../services/reportService';
+import {
+	createReport as createReportService,
+	getUserReportsFromFirestore,
+} from '../services/reportService';
 import { verifyAdminRole } from '../services/adminService';
 
 const AppContext = createContext();
@@ -145,9 +148,13 @@ export const AppProvider = ({ children }) => {
 	const getUserStats = useCallback(() => {
 		const myReports = getUserReports();
 		return {
-			total:    myReports.length,
-			pending:  myReports.filter((r) => r.status === 'pending' || r.status === 'Pending').length,
-			resolved: myReports.filter((r) => r.status === 'resolved' || r.status === 'Resolved').length,
+			total: myReports.length,
+			pending: myReports.filter(
+				(r) => r.status === 'pending' || r.status === 'Pending',
+			).length,
+			resolved: myReports.filter(
+				(r) => r.status === 'resolved' || r.status === 'Resolved',
+			).length,
 		};
 	}, [getUserReports]);
 
@@ -253,10 +260,10 @@ export const AppProvider = ({ children }) => {
 				setReports((prev) => [newReport, ...prev]);
 
 				addNotification({
-					titleKey:   'reportSubmitted',
+					titleKey: 'reportSubmitted',
 					messageKey: 'reportSubmittedMsg',
-					type:       'success',
-					icon:       '✅',
+					type: 'success',
+					icon: '✅',
 				});
 
 				return firestoreId;
@@ -273,6 +280,54 @@ export const AppProvider = ({ children }) => {
 		if (userData.uid) {
 			const isAdminRole = await verifyAdminRole(userData.uid);
 			setIsAdmin(isAdminRole);
+		}
+
+		// Restore session: Load user reports from Firestore
+		// We use the phone number (id) as the primary identifier for reports in this flow
+		const userId = userData.id || userData.uid;
+		if (userId) {
+			setIsLoading(true);
+			try {
+				const userReports = await getUserReportsFromFirestore(userId);
+				// Merge with existing reports or replace?
+				// Since we want to "restore", replacing seems safer to avoid duplicates with initialReports
+				// But we might want to keep other people's reports if this was a public feed?
+				// The app seems to be "My Reports" focused?
+				// getUserReports filters by userId.
+				// But setReports sets the global 'reports' state.
+				// If 'reports' is supposed to contain ALL reports (for admin/feed), this is wrong.
+				// But getUserReports in AppContext filters from 'reports'.
+				// If 'reports' only contains MY reports, then it's fine.
+				// Let's check getReportsByStatus('all').
+
+				// If the app supports seeing other people's reports, we shouldn't overwrite all reports.
+				// But getUserReportsFromFirestore ONLY returns MY reports.
+				// If I overwrite 'reports', I lose others' reports.
+
+				// However, if the user just logged in, they shouldn't have any "local" reports yet (except initialReports).
+				// If I replace 'reports' with 'userReports', I effectively show only my reports.
+				// Is there a "Feed" feature?
+				// "admin-dashboard" implies admins see all. Citizens might only see theirs?
+				// app/(user)/reports.jsx likely lists reports.
+
+				// Let's assume for now we just want to load MY reports.
+				// If the app needs a public feed, we would need a 'getAllReports' service.
+
+				// For the purpose of "Restore session", loading my reports is key.
+				// I will append them or replace duplicates.
+
+				setReports((prev) => {
+					// Create a map of existing reports by ID
+					const existingMap = new Map(prev.map((r) => [r.id, r]));
+					// Add/Update with fetched reports
+					userReports.forEach((r) => existingMap.set(r.id, r));
+					return Array.from(existingMap.values());
+				});
+			} catch (error) {
+				console.error('Failed to load user reports on login', error);
+			} finally {
+				setIsLoading(false);
+			}
 		}
 	};
 
