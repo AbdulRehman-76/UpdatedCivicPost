@@ -97,9 +97,9 @@ export default function OTPVerification() {
 			// Restore session
 			await login(userData);
 
-			// Redirect to dashboard
+			// Redirect to home
 			// Using replace to prevent going back to auth screens
-			router.replace('/(user)/dashboard');
+			router.replace('/(user)/home');
 		} catch (error) {
 			console.error('Verification error:', error);
 			Alert.alert('Error', 'Verification failed. Please try again.');
