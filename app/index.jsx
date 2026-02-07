@@ -27,45 +27,11 @@ export default function WelcomeScreen() {
 		<SafeAreaView style={styles.container}>
 			<View style={styles.content}>
 				<View style={styles.header}>
-					<Text style={styles.emoji}>🏛️</Text>
+					<View style={styles.logoContainer}>
+						<Text style={styles.emoji}>🏛️</Text>
+					</View>
 					<Text style={styles.title}>CitizenConnect</Text>
 					<Text style={styles.subtitle}>{t('reportTrackResolve')}</Text>
-				</View>
-
-				<View style={styles.features}>
-					<View style={styles.featureItem}>
-						<Text style={styles.featureIcon}>📝</Text>
-						<View style={styles.featureText}>
-							<Text style={styles.featureTitle}>
-								{t('reportInstantly')}
-							</Text>
-							<Text style={styles.featureDesc}>
-								{t('quickReporting')}
-							</Text>
-						</View>
-					</View>
-					<View style={styles.featureItem}>
-						<Text style={styles.featureIcon}>📍</Text>
-						<View style={styles.featureText}>
-							<Text style={styles.featureTitle}>
-								{t('selectLocation')}
-							</Text>
-							<Text style={styles.featureDesc}>
-								{t('tapToSelect')}
-							</Text>
-						</View>
-					</View>
-					<View style={styles.featureItem}>
-						<Text style={styles.featureIcon}>🔄</Text>
-						<View style={styles.featureText}>
-							<Text style={styles.featureTitle}>
-								{t('realTimeUpdates')}
-							</Text>
-							<Text style={styles.featureDesc}>
-								{t('trackStatus')}
-							</Text>
-						</View>
-					</View>
 				</View>
 
 				<View style={styles.buttons}>
@@ -73,7 +39,6 @@ export default function WelcomeScreen() {
 						style={styles.citizenButton}
 						onPress={handleCitizenMode}
 					>
-						<Text style={styles.buttonIcon}>👤</Text>
 						<Text style={styles.buttonText}>{t('getStarted')}</Text>
 					</TouchableOpacity>
 
@@ -81,7 +46,6 @@ export default function WelcomeScreen() {
 						style={styles.adminButton}
 						onPress={handleAdminMode}
 					>
-						<Text style={styles.buttonIcon}>🔐</Text>
 						<Text style={styles.adminButtonText}>
 							{t('adminDashboard')}
 						</Text>
@@ -97,109 +61,84 @@ export default function WelcomeScreen() {
 const styles = StyleSheet.create({
 	container: {
 		flex: 1,
-		backgroundColor: '#f0fdf4',
+		backgroundColor: '#ffffff',
 	},
 	content: {
 		flex: 1,
-		paddingHorizontal: 24,
+		paddingHorizontal: 32,
 		justifyContent: 'center',
 	},
 	header: {
 		alignItems: 'center',
-		marginBottom: 48,
+		marginBottom: 60,
+	},
+	logoContainer: {
+		width: 120,
+		height: 120,
+		backgroundColor: '#f0fdf4',
+		borderRadius: 60,
+		alignItems: 'center',
+		justifyContent: 'center',
+		marginBottom: 24,
 	},
 	emoji: {
-		fontSize: 80,
-		marginBottom: 16,
+		fontSize: 60,
 	},
 	title: {
-		fontSize: 32,
-		fontWeight: 'bold',
+		fontSize: 36,
+		fontWeight: '800',
 		color: '#166534',
-		marginBottom: 8,
+		marginBottom: 12,
+		letterSpacing: -0.5,
 	},
 	subtitle: {
-		fontSize: 16,
-		color: '#6b7280',
+		fontSize: 18,
+		color: '#64748b',
 		textAlign: 'center',
-	},
-	features: {
-		marginBottom: 48,
-	},
-	featureItem: {
-		flexDirection: 'row',
-		alignItems: 'center',
-		backgroundColor: '#ffffff',
-		padding: 16,
-		borderRadius: 16,
-		marginBottom: 12,
-		shadowColor: '#000',
-		shadowOffset: { width: 0, height: 2 },
-		shadowOpacity: 0.05,
-		shadowRadius: 8,
-		elevation: 2,
-	},
-	featureIcon: {
-		fontSize: 32,
-		marginRight: 16,
-	},
-	featureText: {
-		flex: 1,
-	},
-	featureTitle: {
-		fontSize: 16,
-		fontWeight: '600',
-		color: '#1f2937',
-		marginBottom: 2,
-	},
-	featureDesc: {
-		fontSize: 14,
-		color: '#6b7280',
+		lineHeight: 26,
+		maxWidth: '80%',
 	},
 	buttons: {
-		gap: 12,
+		gap: 16,
+		width: '100%',
 	},
 	citizenButton: {
-		flexDirection: 'row',
-		alignItems: 'center',
-		justifyContent: 'center',
 		backgroundColor: '#22c55e',
-		paddingVertical: 18,
-		borderRadius: 16,
-		gap: 8,
+		paddingVertical: 20,
+		borderRadius: 12,
+		alignItems: 'center',
 		shadowColor: '#22c55e',
 		shadowOffset: { width: 0, height: 4 },
-		shadowOpacity: 0.3,
-		shadowRadius: 8,
-		elevation: 4,
+		shadowOpacity: 0.2,
+		shadowRadius: 12,
+		elevation: 5,
 	},
 	adminButton: {
-		flexDirection: 'row',
+		backgroundColor: '#f8fafc',
+		paddingVertical: 20,
+		borderRadius: 12,
 		alignItems: 'center',
-		justifyContent: 'center',
-		backgroundColor: '#1e293b',
-		paddingVertical: 18,
-		borderRadius: 16,
-		gap: 8,
-	},
-	buttonIcon: {
-		fontSize: 20,
+		borderWidth: 1,
+		borderColor: '#e2e8f0',
 	},
 	buttonText: {
 		fontSize: 18,
-		fontWeight: '600',
+		fontWeight: '700',
 		color: '#ffffff',
 	},
 	adminButtonText: {
 		fontSize: 18,
 		fontWeight: '600',
-		color: '#ffffff',
+		color: '#475569',
 	},
 	footer: {
+		position: 'absolute',
+		bottom: 40,
+		left: 0,
+		right: 0,
 		textAlign: 'center',
-		color: '#9ca3af',
-		marginTop: 32,
-		fontSize: 12,
+		color: '#94a3b8',
+		fontSize: 14,
 	},
 });
 
