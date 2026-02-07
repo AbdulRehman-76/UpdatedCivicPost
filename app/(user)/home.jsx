@@ -84,7 +84,7 @@ export default function HomeScreen() {
 		const capitalizedStatus = capitalize(item.status);
 		const statusStyle = getStatusColor(item.status, isDark);
 		const category = departments.find((c) => c.id === item.category);
-		const icon = category ? getDeptIcon(category.name) : null;
+		const icon = category ? getDeptIcon(category) : null;
 
 		return (
 			<TouchableOpacity
@@ -102,7 +102,11 @@ export default function HomeScreen() {
 							]}
 						>
 							{icon ? (
-								<Text style={{ fontSize: 20 }}>{icon.icon}</Text>
+								icon.isEmoji ? (
+									<Text style={{ fontSize: 20 }}>{icon.icon}</Text>
+								) : (
+									<Ionicons name={icon.icon} size={20} color={icon.color} />
+								)
 							) : (
 								<Text style={styles.reportIcon}>📋</Text>
 							)}
@@ -296,7 +300,7 @@ export default function HomeScreen() {
 						.filter((d) => d.isActive !== false)
 						.slice(0, 6)
 						.map((category) => {
-							const icon = getDeptIcon(category.name);
+							const icon = getDeptIcon(category);
 							return (
 								<TouchableOpacity
 									key={category.id}
@@ -320,9 +324,13 @@ export default function HomeScreen() {
 											},
 										]}
 									>
-										<Text style={{ fontSize: 24 }}>
-											{icon.icon}
-										</Text>
+										{icon.isEmoji ? (
+											<Text style={{ fontSize: 24 }}>
+												{icon.icon}
+											</Text>
+										) : (
+											<Ionicons name={icon.icon} size={24} color={icon.color} />
+										)}
 									</View>
 									<Text
 										style={[

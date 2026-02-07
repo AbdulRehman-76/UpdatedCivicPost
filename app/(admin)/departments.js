@@ -203,7 +203,7 @@ export default function DepartmentsScreen() {
 	};
 
 	const resolveIcon = (dept) => {
-		return getDeptIcon(dept.name);
+		return getDeptIcon(dept);
 	};
 
 	// ── Render department card ──
@@ -220,7 +220,11 @@ export default function DepartmentsScreen() {
 				<View
 					style={[styles.iconBg, { backgroundColor: icon.color + '22' }]}
 				>
-					<Text style={{ fontSize: 26 }}>{icon.icon}</Text>
+					{icon.isEmoji ? (
+						<Text style={{ fontSize: 26 }}>{icon.icon}</Text>
+					) : (
+						<Ionicons name={icon.icon} size={26} color={icon.color} />
+					)}
 				</View>
 				<View style={styles.info}>
 					<Text style={styles.name}>{item.name}</Text>

@@ -146,7 +146,10 @@ export default function AdminReportsScreen() {
 	const renderReport = ({ item }) => {
 		const ns = normalizeStatus(item.status);
 		const statusStyle = getStatusStyle(ns);
-		const deptIcon = getDeptIcon(item.category);
+		
+		// Find the department object to get the saved iconName/color
+		const deptObj = departments.find(d => d.name === item.category);
+		const deptIcon = getDeptIcon(deptObj || item.category);
 
 		return (
 			<TouchableOpacity
@@ -167,7 +170,11 @@ export default function AdminReportsScreen() {
 							{ backgroundColor: deptIcon.color + '22' },
 						]}
 					>
-						<Text style={{ fontSize: 22 }}>{deptIcon.icon}</Text>
+						{deptIcon.isEmoji ? (
+							<Text style={{ fontSize: 22 }}>{deptIcon.icon}</Text>
+						) : (
+							<Ionicons name={deptIcon.icon} size={22} color={deptIcon.color} />
+						)}
 					</View>
 
 					<View style={styles.reportInfo}>
@@ -314,7 +321,7 @@ export default function AdminReportsScreen() {
 					</TouchableOpacity>
 					{departments.map((d) => {
 						const active = deptFilter === d.name;
-						const icon = getDeptIcon(d.name);
+						const icon = getDeptIcon(d);
 						return (
 							<TouchableOpacity
 								key={d.id}
@@ -327,7 +334,11 @@ export default function AdminReportsScreen() {
 									setShowDeptPicker(false);
 								}}
 							>
-								<Text style={{ fontSize: 16 }}>{icon.icon}</Text>
+								{icon.isEmoji ? (
+									<Text style={{ fontSize: 16 }}>{icon.icon}</Text>
+								) : (
+									<Ionicons name={icon.icon} size={16} color={icon.color} />
+								)}
 								<Text
 									style={[
 										styles.deptDropdownText,

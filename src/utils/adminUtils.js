@@ -85,11 +85,29 @@ const FALLBACK_ICON = { icon: '❓', color: '#6366f1' };
  * Note: icon is now an emoji string as requested by the user.
  */
 export function getDeptIcon(nameOrObj) {
+  // 1. If it's a full department object from Firestore (which has iconName/color)
+  if (nameOrObj && typeof nameOrObj === 'object') {
+    if (nameOrObj.iconName) {
+      return { 
+        icon: nameOrObj.iconName, // This is the Ionicons name like 'paw'
+        color: nameOrObj.color || '#6366f1',
+        isEmoji: false 
+      };
+    }
+  }
+
   const name = typeof nameOrObj === 'string' ? nameOrObj : nameOrObj?.name || '';
   if (!name) return FALLBACK_ICON;
   
   const normalizedName = name.toLowerCase().trim();
-  return DEPARTMENT_ICONS[normalizedName] || FALLBACK_ICON;
+  
+  // 2. Check the static mappings (emojis) for backward compatibility or when only name is available
+  const staticIcon = DEPARTMENT_ICONS[normalizedName];
+  if (staticIcon) {
+    return { ...staticIcon, isEmoji: true };
+  }
+
+  return { ...FALLBACK_ICON, isEmoji: true };
 }
 
 // ─────────────────────────────────────────────

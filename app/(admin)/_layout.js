@@ -5,7 +5,7 @@ import { useApp } from '../../src/context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
 
 // Screens where the bottom tab bar should be hidden
-const HIDDEN_TAB_SCREENS = ['login', 'report-detail'];
+const HIDDEN_TAB_SCREENS = ['login', 'forgot-password', 'report-detail'];
 
 export default function AdminLayout() {
   const { isAdmin } = useApp();
@@ -16,8 +16,9 @@ export default function AdminLayout() {
     const inAdminGroup = segments[0] === '(admin)';
     const currentScreen = segments[1]; // e.g. "login", "dashboard", "reports"…
     const isLoginPage = currentScreen === 'login';
+    const isForgotPasswordPage = currentScreen === 'forgot-password';
 
-    if (inAdminGroup && !isAdmin && !isLoginPage) {
+    if (inAdminGroup && !isAdmin && !isLoginPage && !isForgotPasswordPage) {
       const t = setTimeout(() => router.replace('/(admin)/login'), 0);
       return () => clearTimeout(t);
     }
@@ -41,6 +42,12 @@ export default function AdminLayout() {
       {/* ── Hidden: Login (no tab bar, not in tab list) ── */}
       <Tabs.Screen
         name="login"
+        options={{ href: null }}
+      />
+
+      {/* ── Hidden: Forgot Password ── */}
+      <Tabs.Screen
+        name="forgot-password"
         options={{ href: null }}
       />
 

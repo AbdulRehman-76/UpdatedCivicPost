@@ -8,54 +8,48 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { auth } from '../../src/config/firebase';
 import { useLanguage } from '../../src/context/LanguageContext';
-import { useApp } from '../../src/context/AppContext';
-import { verifyAdminRole } from '../../src/services/adminService';
+import { resetUserPassword } from '../../src/services/adminService';
 
-export default function AdminLoginScreen() {
+export default function AdminForgotPasswordScreen() {
   const router = useRouter();
   const { t } = useLanguage();
-  const { login } = useApp();
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async () => {
-    if (!email.trim() || !password.trim()) {
-      Alert.alert(t('error'), t('pleaseEnterCredentials'));
+  const handleResetPassword = async () => {
+    if (!email.trim()) {
+      Alert.alert(t('error') || 'Error', t('pleaseEnterEmail') || 'Please enter your email address.');
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      Alert.alert(t('error') || 'Error', t('invalidEmail') || 'Please enter a valid email address.');
       return;
     }
 
     setLoading(true);
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
-      const user = userCredential.user;
-
-      const isAdmin = await verifyAdminRole(user.uid);
-
-      if (isAdmin) {
-        await login({ uid: user.uid, email: user.email, role: 'admin' });
-        router.replace('/(admin)/dashboard');
-      } else {
-        await signOut(auth);
-        Alert.alert(t('error'), 'Access Denied. Admin privileges required.');
-      }
+      await resetUserPassword(email.trim());
+      Alert.alert(
+        t('success') || 'Success',
+        t('resetLinkSent') || 'A password reset link has been sent to your email.',
+        [{ text: 'OK', onPress: () => router.back() }]
+      );
     } catch (error) {
-      console.error('Login error:', error);
-      let msg = 'An unexpected error occurred.';
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
-        msg = 'Invalid email or password.';
+      console.error('Password reset error:', error);
+      let msg = t('resetError') || 'Failed to send reset email. Please try again.';
+      if (error.code === 'auth/user-not-found') {
+        msg = t('userNotFound') || 'No user found with this email.';
       } else if (error.code === 'auth/invalid-email') {
-        msg = 'Invalid email format.';
-      } else if (error.code === 'auth/too-many-requests') {
-        msg = 'Too many attempts. Please try again later.';
+        msg = t('invalidEmail') || 'Invalid email format.';
       }
-      Alert.alert(t('error'), msg);
+      Alert.alert(t('error') || 'Error', msg);
     } finally {
       setLoading(false);
     }
@@ -71,10 +65,12 @@ export default function AdminLoginScreen() {
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.iconBg}>
-              <Text style={styles.lockIcon}>🔐</Text>
+              <Text style={styles.lockIcon}>📧</Text>
             </View>
-            <Text style={styles.title}>{t('adminPortal') || 'Admin Portal'}</Text>
-            <Text style={styles.subtitle}>{t('secureAccess') || 'Secure administrative access'}</Text>
+            <Text style={styles.title}>{t('resetPassword') || 'Reset Password'}</Text>
+            <Text style={styles.subtitle}>
+              {t('resetPasswordSubtitle') || 'Enter your registered email to receive a password reset link.'}
+            </Text>
           </View>
 
           {/* Form */}
@@ -93,42 +89,26 @@ export default function AdminLoginScreen() {
               />
             </View>
 
-            <View style={styles.inputContainer}>
-              <Text style={styles.inputIcon}>🔑</Text>
-              <TextInput
-                style={styles.input}
-                placeholder={t('password') || 'Password'}
-                placeholderTextColor="#64748b"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-                autoComplete="password"
-              />
-            </View>
-
             <TouchableOpacity
-              style={[styles.loginButton, loading && styles.loginButtonDisabled]}
-              onPress={handleLogin}
+              style={[styles.resetButton, loading && styles.resetButtonDisabled]}
+              onPress={handleResetPassword}
               disabled={loading}
               activeOpacity={0.8}
             >
-              <Text style={styles.loginButtonText}>
-                {loading ? (t('loggingIn') || 'Signing in…') : (`${t('login') || 'Sign In'} →`)}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={styles.forgotPassword}
-              onPress={() => router.push('/(admin)/forgot-password')}
-            >
-              <Text style={styles.forgotPasswordText}>{t('forgotPassword') || 'Forgot password?'}</Text>
+              {loading ? (
+                <ActivityIndicator color="#ffffff" />
+              ) : (
+                <Text style={styles.resetButtonText}>
+                  {t('sendResetLink') || 'Send Reset Link'}
+                </Text>
+              )}
             </TouchableOpacity>
           </View>
 
           {/* Footer */}
           <View style={styles.footer}>
-            <TouchableOpacity onPress={() => router.replace('/')}>
-              <Text style={styles.backToApp}>← {t('backToCitizenApp') || 'Back to Citizen App'}</Text>
+            <TouchableOpacity onPress={() => router.back()}>
+              <Text style={styles.backToLogin}>{t('backToLogin') || 'Back to Login'}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -172,7 +152,7 @@ const styles = StyleSheet.create({
   },
   inputIcon: { fontSize: 18, marginRight: 12, width: 24, textAlign: 'center' },
   input: { flex: 1, paddingVertical: 16, fontSize: 16, color: '#ffffff' },
-  loginButton: {
+  resetButton: {
     backgroundColor: '#8b5cf6',
     paddingVertical: 18,
     borderRadius: 14,
@@ -184,12 +164,10 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 5,
   },
-  loginButtonDisabled: { backgroundColor: '#475569', shadowOpacity: 0 },
-  loginButtonText: { color: '#ffffff', fontSize: 18, fontWeight: '600' },
-  forgotPassword: { alignItems: 'center', marginTop: 4 },
-  forgotPasswordText: { color: '#64748b', fontSize: 14 },
+  resetButtonDisabled: { backgroundColor: '#475569', shadowOpacity: 0 },
+  resetButtonText: { color: '#ffffff', fontSize: 18, fontWeight: '600' },
 
   // Footer
   footer: { marginTop: 48, alignItems: 'center' },
-  backToApp: { color: '#8b5cf6', fontSize: 15, fontWeight: '500' },
+  backToLogin: { color: '#8b5cf6', fontSize: 15, fontWeight: '500' },
 });
